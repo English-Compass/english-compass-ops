@@ -1,0 +1,132 @@
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    ports:
+      - "8080:8080"      # Spring Boot API Gateway
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-this-in-production-minimum-256-bits}
+      - SPRING_PROFILES_ACTIVE=docker
+    networks:
+      - english-compass-network
+    restart: unless-stopped
+    # 메모리 제한: 512MB
+    mem_limit: 512m
+    mem_reservation: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+
+  # 공용 MySQL 데이터베이스 (UserService용)
+  db:
+    image: mysql:8.0
+    container_name: user-service-mysql
+    mem_limit: 512m
+    memswap_limit: 512m
+    environment:
+      - MYSQL_DATABASE=user_service_db
+      - MYSQL_ROOT_PASSWORD=Root123!
+      - MYSQL_USER=user_service_user
+      - MYSQL_PASSWORD=user_service_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - english-compass-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # 공용 Redis (UserService용 - 세션 및 토큰 캐싱)
+  redis:
+    image: redis:7-alpine
+    container_name: user-service-redis
+    mem_limit: 512m
+    memswap_limit: 512m
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - english-compass-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # 공용 Zookeeper (Kafka 의존성)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: user-service-zookeeper
+    mem_limit: 512m
+    memswap_limit: 512m
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - english-compass-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # 공용 Kafka 메시지 브로커 (UserService용 - 프로필 이벤트 발행)
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: user-service-kafka
+    mem_limit: 512m
+    memswap_limit: 512m
+    ports:
+      - "9094:9092"  # 외부 포트 9094, 내부 포트 9092 (PLAINTEXT 리스너)
+      - "9095:9093"  # 외부 포트 9095, 내부 포트 9093 (PLAINTEXT_EXTERNAL 리스너)
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # 공유 네트워크를 사용하는 경우:
+      # - PLAINTEXT://kafka:9092: 같은 docker-compose 내의 컨테이너 간 통신
+      # - PLAINTEXT_EXTERNAL://user-service-kafka:9093: 공유 네트워크를 통한 다른 docker-compose의 컨테이너에서 접근
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_EXTERNAL://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_EXTERNAL://user-service-kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+    networks:
+      - english-compass-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  english-compass-network:
+    driver: bridge
+    name: english-compass-network
+
