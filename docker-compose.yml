@@ -23,9 +23,9 @@ services:
       start_period: 60s
 
   # UserService 전용 MySQL 데이터베이스
-  db:
+  user_service_db:
     image: mysql:8.0
-    container_name: user-service-mysql
+    container_name: user_service_db
     mem_limit: 512m
     memswap_limit: 512m
     environment:
@@ -37,6 +37,7 @@ services:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     networks:
       - english-compass-network
     restart: unless-stopped
@@ -48,9 +49,9 @@ services:
       start_period: 60s
 
   # ProblemService 전용 MySQL 데이터베이스
-  problem-db:
+  problem_service_db:
     image: mysql:8.0
-    container_name: problem-mysql
+    container_name: problem_service_db
     mem_limit: 512m
     memswap_limit: 512m
     environment:
@@ -58,11 +59,12 @@ services:
       - MYSQL_ROOT_PASSWORD=Root123!
       - MYSQL_USER=problem_service_user
       - MYSQL_PASSWORD=problem_service_password
-      
+        
     ports:
       - "3308:3306"  # UserService MySQL과 포트 충돌 방지
     volumes:
       - problem_mysql_data:/var/lib/mysql
+      - ./init-scripts/02-init-problem-service.sql:/docker-entrypoint-initdb.d/02-init-problem-service.sql
     networks:
       - english-compass-network
     restart: unless-stopped
@@ -155,6 +157,6 @@ volumes:
 
 networks:
   english-compass-network:
-    driver: bridge
+    external: true
     name: english-compass-network
 

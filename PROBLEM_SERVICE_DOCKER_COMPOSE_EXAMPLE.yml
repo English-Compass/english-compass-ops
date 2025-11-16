@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: problem-app
+    ports:
+      - "8082:8080"    # Spring Boot application port (API Gateway 설정과 일치)
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      # MySQL 연결 (공용 DB 서버)
+      # API Gateway의 problem-db 서비스에 연결
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL:-jdbc:mysql://problem-db:3306/problem_service_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul}
+      - SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME:-problem_service_user}
+      - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:-problem_service_password}
+      # Hibernate DDL settings
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      # Kafka 연결 (공용 Kafka 서버)
+      # API Gateway의 kafka 서비스에 연결
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      # Redis 연결 (공용 Redis 서버)
+      # API Gateway의 redis 서비스에 연결
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_DATABASE=${REDIS_DATABASE:-0}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # 외부 API 키
+      - KAKAO_API_KEY=${KAKAO_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+    # 공용 인프라 네트워크에 연결 (필수!)
+    networks:
+      - english-compass-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# 공용 인프라 네트워크 참조 (API Gateway에서 생성된 네트워크)
+networks:
+  english-compass-network:
+    external: true
+    name: english-compass-network
+
