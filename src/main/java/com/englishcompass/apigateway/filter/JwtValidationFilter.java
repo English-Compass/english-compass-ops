@@ -139,7 +139,20 @@ public class JwtValidationFilter extends AbstractGatewayFilterFactory<JwtValidat
      */
     private boolean isPublicPath(String path) {
         // /api/auth/** 경로는 모두 공개 경로
-        return path.startsWith("/api/auth/");
+        if (path.startsWith("/api/auth/")) {
+            return true;
+        }
+        // /api/problem/internal/** 경로는 서비스 간 통신용으로 공개 경로
+        if (path.startsWith("/api/problem/internal/")) {
+            log.debug("Internal API path detected, skipping JWT validation: {}", path);
+            return true;
+        }
+        // /api/analysis/** 경로는 대시보드용으로 공개 경로 (개발용)
+        if (path.startsWith("/api/analysis/")) {
+            log.debug("Analysis service path detected, skipping JWT validation: {}", path);
+            return true;
+        }
+        return false;
     }
 
     /**

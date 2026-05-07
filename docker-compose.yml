@@ -7,10 +7,13 @@ services:
     ports:
       - "8080:8080"      # Spring Boot API Gateway
     environment:
+      - JAVA_OPTS=-Xms256m -Xmx512m -XX:+UseG1GC
       - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-this-in-production-minimum-256-bits}
       - SPRING_PROFILES_ACTIVE=docker
     networks:
       - english-compass-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # 호스트 머신의 로컬 서비스 접근용
     restart: unless-stopped
     # 메모리 제한: 512MB
     mem_limit: 512m
@@ -22,58 +25,31 @@ services:
       retries: 3
       start_period: 60s
 
-  # UserService 전용 MySQL 데이터베이스
-  user_service_db:
+  # 공용 MySQL (단일 인스턴스, 서비스별 논리 DB 분리)
+  mysql:
     image: mysql:8.0
-    container_name: user_service_db
-    mem_limit: 512m
-    memswap_limit: 512m
+    container_name: mysql
+    mem_limit: 1g
+    memswap_limit: 1g
     environment:
-      - MYSQL_DATABASE=user_service_db
       - MYSQL_ROOT_PASSWORD=Root123!
-      - MYSQL_USER=user_service_user
-      - MYSQL_PASSWORD=user_service_password
     ports:
-      - "3307:3306"
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+      - ./init-scripts/01-databases.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+      - ./init-scripts/user-service/01-init-user-service.sql:/docker-entrypoint-initdb.d/02-user-service.sql:ro
+      - ./init-scripts/problem-service/02-init-problem-service.sql:/docker-entrypoint-initdb.d/03-problem-service.sql:ro
+      - ./init-scripts/problem-service/03.quiz_data_inserts.sql:/docker-entrypoint-initdb.d/04-quiz-data.sql:ro
     networks:
       - english-compass-network
     restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pRoot123!"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 60s
-
-  # ProblemService 전용 MySQL 데이터베이스
-  problem_service_db:
-    image: mysql:8.0
-    container_name: problem_service_db
-    mem_limit: 512m
-    memswap_limit: 512m
-    environment:
-      - MYSQL_DATABASE=problem_service_db
-      - MYSQL_ROOT_PASSWORD=Root123!
-      - MYSQL_USER=problem_service_user
-      - MYSQL_PASSWORD=problem_service_password
-        
-    ports:
-      - "3308:3306"  # UserService MySQL과 포트 충돌 방지
-    volumes:
-      - problem_mysql_data:/var/lib/mysql
-      - ./init-scripts/02-init-problem-service.sql:/docker-entrypoint-initdb.d/02-init-problem-service.sql
-    networks:
-      - english-compass-network
-    restart: unless-stopped
-    command: --default-authentication-plugin=mysql_native_password
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 60s
 
   # 공용 Redis (세션 및 토큰 캐싱)
@@ -124,17 +100,19 @@ services:
     mem_limit: 512m
     memswap_limit: 512m
     ports:
-      - "9094:9092"  # 외부 포트 9094, 내부 포트 9092 (PLAINTEXT 리스너)
-      - "9095:9093"  # 외부 포트 9095, 내부 포트 9093 (PLAINTEXT_EXTERNAL 리스너)
+      - "9094:9093"  # 외부 포트 9094, 내부 포트 9093 (PLAINTEXT_HOST 리스너 - 호스트 접근용)
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      # 공유 네트워크를 사용하는 경우:
-      # - PLAINTEXT://kafka:9092: 같은 docker-compose 내의 컨테이너 간 통신
-      # - PLAINTEXT_EXTERNAL://kafka:9093: 공유 네트워크를 통한 다른 docker-compose의 컨테이너에서 접근
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_EXTERNAL://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_EXTERNAL://kafka:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT
+      # 리스너 설정:
+      # - PLAINTEXT://0.0.0.0:9092: 같은 docker-compose 내의 컨테이너 간 통신
+      # - PLAINTEXT_HOST://0.0.0.0:9093: 호스트 머신에서 접근 (포트 매핑 9094:9093)
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
+      # Advertised Listeners:
+      # - PLAINTEXT://kafka:9092: 컨테이너 간 통신 시 사용
+      # - PLAINTEXT_HOST://localhost:9094: 호스트에서 접근 시 사용
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
@@ -150,9 +128,25 @@ services:
       retries: 3
       start_period: 60s
 
+  # Kafka UI (Kafka 관리 및 모니터링 도구)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8090:8080"  # 브라우저 접속 포트 (API Gateway와 포트 충돌 방지)
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092  # Kafka 서비스 이름
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - english-compass-network  # Kafka와 같은 네트워크 필수
+    depends_on:
+      - kafka
+      - zookeeper
+    restart: unless-stopped
+
 volumes:
   mysql_data:
-  problem_mysql_data:
   redis_data:
 
 networks:

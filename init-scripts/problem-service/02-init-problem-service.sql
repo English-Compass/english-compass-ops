@@ -11,6 +11,8 @@
 --      - ./init-scripts/quiz_data_inserts.sql:/docker-entrypoint-initdb.d/02-quiz-data.sql
 -- =============================================
 
+USE problem_service_db;
+
 -- 문자셋 설정 (한글 지원을 위해 필수)
 SET NAMES utf8mb4;
 SET CHARACTER SET utf8mb4;
@@ -132,16 +134,27 @@ CREATE TABLE session_question_categories (
 CREATE TABLE user_profiles (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '식별자',
     user_id VARCHAR(255) NOT NULL UNIQUE COMMENT '사용자 ID',
-    
-    -- UserService로부터 받는 프로필 정보 (이벤트로 전달)
-    difficulty_level INT NULL COMMENT '사용자 난이도 레벨 (1: 초급, 2: 중급, 3: 고급)',
-    selected_categories TEXT COMMENT '사용자 선택 카테고리 (JSON array: ["학업", "비즈니스", ...])',
-    
+
+    -- UserService 이벤트로 전달받는 프로필
+    difficulty_level INT NULL COMMENT '난이도 레벨 (1:초급, 2:중급, 3:고급)',
+    selected_categories TEXT COMMENT '선택 카테고리 JSON',
+
+    -- LearningService 분석 결과
+    preferred_question_types TEXT COMMENT '선호 문제 유형 JSON',
+    weak_categories TEXT COMMENT '약점 카테고리 JSON',
+    weak_question_types TEXT COMMENT '약점 문제 유형 JSON',
+    recommended_question_ids TEXT COMMENT '추천 문제 ID JSON',
+    focus_areas TEXT COMMENT '집중 학습 영역 JSON',
+    consistency_score DOUBLE NULL COMMENT '일관성 점수 (0-100)',
+    overall_learning_pattern VARCHAR(255) NULL COMMENT '학습 패턴',
+    average_time_per_question DOUBLE NULL COMMENT '문제당 평균 풀이 시간(초)',
+    last_analysis_at DATETIME(6) NULL COMMENT '마지막 분석 시간',
+
     -- 메타데이터
-    profile_version INT DEFAULT 1 COMMENT '프로필 버전 (업데이트마다 증가)',
-    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '생성 시간',
-    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '업데이트 시간'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자 프로필 테이블 (UserService 이벤트 기반)';
+    profile_version INT DEFAULT 1 COMMENT '프로필 버전',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자 프로필 테이블';
 
 -- ===========================================
 -- 3. 인덱스 및 성능 최적화

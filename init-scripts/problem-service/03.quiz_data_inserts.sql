@@ -4,9 +4,11 @@
 -- Total questions: 696
 -- =============================================
 
+USE problem_service_db;
+
 -- IF NOT EXISTS 구문으로 중복 삽입 방지
 -- MySQL에서는 INSERT IGNORE를 사용
-
+set names utf8mb4;
 INSERT IGNORE INTO question (
     question_id, question_text, option_a, option_b, option_c, 
     correct_answer, major_category, minor_category, question_type, 
